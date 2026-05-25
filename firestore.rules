@@ -1,0 +1,63 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net: default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Phase 3: Global helper primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // 2. Users Collection Rules
+    match /users/{userId} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId && isValidId(userId) && isValidUser(incoming());
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['userId', 'email', 'updatedAt']) 
+        && data.userId == request.auth.uid
+        && data.email is string && data.email.size() <= 256
+        && data.updatedAt is timestamp;
+    }
+
+    // 3. Orders Collection Rules
+    match /orders/{orderId} {
+      allow read: if isSignedIn() && (existing().userId == request.auth.uid) && isValidId(orderId);
+      allow create: if isSignedIn() && isValidId(orderId) && isValidOrder(incoming());
+      allow update: if isSignedIn() && isValidId(orderId) && isValidOrder(incoming()) && (
+        existing().userId == request.auth.uid && (
+          // Allow updating status if necessary, or check immutability of fields like orderId and userId
+          incoming().orderId == existing().orderId &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt
+        )
+      );
+      allow delete: if false; // Orders cannot be deleted
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll(['orderId', 'userId', 'status', 'total', 'createdAt'])
+        && data.userId == request.auth.uid
+        && data.orderId is string && data.orderId.size() <= 128
+        && data.status is string && data.status.size() <= 32
+        && (data.status == 'pending' || data.status == 'processed' || data.status == 'shipped' || data.status == 'delivered')
+        && data.total is number
+        && data.createdAt is timestamp;
+    }
+  }
+}

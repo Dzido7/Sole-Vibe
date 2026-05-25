@@ -1,0 +1,88 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile details",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Unique user ID matching Auth UID"
+        },
+        "email": {
+          "type": "string",
+          "description": "User account email"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Responsive avatar name"
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "Avatar URL"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Tracking change time"
+        }
+      },
+      "required": [
+        "userId",
+        "email",
+        "updatedAt"
+      ]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Cart orders made by users logged in via Google signin",
+      "type": "object",
+      "properties": {
+        "orderId": {
+          "type": "string",
+          "description": "Unique ID matching Tracking ID"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Google Auth profile owner UID"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "processed",
+            "shipped",
+            "delivered"
+          ],
+          "description": "Tracking status state"
+        },
+        "total": {
+          "type": "number",
+          "description": "Transaction total price"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        }
+      },
+      "required": [
+        "orderId",
+        "userId",
+        "status",
+        "total",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "Collection of user profiles synced upon authentication"
+    },
+    "orders/{orderId}": {
+      "schema": "Order",
+      "description": "E-commerce order tracking database"
+    }
+  }
+}

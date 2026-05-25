@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Heart, ShoppingBag, Star, Share2, CornerDownRight, ShieldAlert, Award, ArrowLeft, Check, Copy } from "lucide-react";
 import { Product, Review } from "../types";
+import { auth } from "../firebase";
 
 interface ProductDetailsProps {
   product: Product;
@@ -34,6 +35,15 @@ export default function ProductDetails({
   });
   const [submittingReview, setSubmittingReview] = useState(false);
   const [reviewError, setReviewError] = useState("");
+
+  useEffect(() => {
+    if (auth.currentUser) {
+      setReviewForm((prev) => ({
+        ...prev,
+        username: auth.currentUser?.displayName || auth.currentUser?.email?.split("@")[0] || ""
+      }));
+    }
+  }, []);
 
   const fetchReviews = async () => {
     try {

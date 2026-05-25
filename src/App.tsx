@@ -1,6 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Search, ShoppingBag, Heart, Bell, Truck, SlidersHorizontal, Sparkles, Check, Flame } from "lucide-react";
+import { Search, ShoppingBag, Heart, Bell, Truck, SlidersHorizontal, Sparkles, Check, Flame, LogIn, LogOut, User as UserIcon } from "lucide-react";
+
+import { auth, db, googleProvider, handleFirestoreError, OperationType } from "./firebase";
+import { signInWithPopup, signOut, onAuthStateChanged, User } from "firebase/auth";
+import { setDoc, doc, getDocFromServer, serverTimestamp } from "firebase/firestore";
 
 import { Product, CartItem, Order } from "./types";
 import ProductCard from "./components/ProductCard";
@@ -15,6 +19,10 @@ import RecommendationPanel from "./components/RecommendationPanel";
 export default function App() {
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  
+  // Firebase User Auth State
+  const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   
   // Storage keys
   const CART_KEY = "solevibe_cart";
@@ -97,11 +105,75 @@ export default function App() {
     }
   };
 
+  const syncUserProfile = async (currentUser: User) => {
+    const path = `users/${currentUser.uid}`;
+    try {
+      await setDoc(doc(db, "users", currentUser.uid), {
+        userId: currentUser.uid,
+        email: currentUser.email || "",
+        displayName: currentUser.displayName || "",
+        photoURL: currentUser.photoURL || "",
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      console.log("Successfully synchronized profile with Firestore for user:", currentUser.uid);
+    } catch (err) {
+      try {
+        handleFirestoreError(err, OperationType.WRITE, path);
+      } catch (reporterError) {
+        console.error("Failed to sync user profile: Firebase reports blocked access", reporterError);
+      }
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      if (result.user) {
+        showToast(`⚡ Welcome ${result.user.displayName || "Shoehead"}!`);
+      }
+    } catch (err: any) {
+      console.error("Google login failed:", err);
+      showToast("⚠️ Authentication failed. Please retry.");
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+      showToast("🔒 Signed out successfully.");
+    } catch (err) {
+      console.error("Logout failed:", err);
+    }
+  };
+
+  const testConnection = async () => {
+    try {
+      await getDocFromServer(doc(db, "test", "connection"));
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("the client is offline")) {
+        console.error("Please check your Firebase configuration.");
+      }
+    }
+  };
+
   useEffect(() => {
     fetchProducts();
     fetchUnreadNotifications();
+    testConnection();
+
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setAuthLoading(false);
+      if (currentUser) {
+        syncUserProfile(currentUser);
+      }
+    });
+
     const interval = setInterval(fetchUnreadNotifications, 8000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      unsubscribe();
+    };
   }, []);
 
   // Browse history tracking
@@ -320,6 +392,50 @@ export default function App() {
                 </span>
               )}
             </button>
+
+            {/* Google Authentication Section */}
+            {authLoading ? (
+              <div className="h-[38px] px-3 bg-white/5 border border-white/10 flex items-center justify-center font-mono text-[9px] text-white/40">
+                LOADING...
+              </div>
+            ) : user ? (
+              <div className="flex items-center gap-2 border border-white/10 bg-neutral-900/60 p-1 pl-2 h-[38px] rounded-none">
+                <div className="flex flex-col text-right">
+                  <span className="text-[9px] font-bold text-white/40 uppercase tracking-widest leading-none">MEMBER</span>
+                  <span className="text-[10px] font-black uppercase text-blue-500 max-w-[80px] truncate leading-tight mt-0.5">
+                    {user.displayName?.split(" ")[0]}
+                  </span>
+                </div>
+                {user.photoURL ? (
+                  <img
+                    src={user.photoURL}
+                    alt={user.displayName || ""}
+                    referrerPolicy="no-referrer"
+                    className="w-7 h-7 rounded-none border border-white/10"
+                  />
+                ) : (
+                  <div className="w-7 h-7 bg-blue-600 flex items-center justify-center font-bold text-xs text-white uppercase font-sans">
+                    {user.displayName?.charAt(0) || user.email?.charAt(0) || "U"}
+                  </div>
+                )}
+                <button
+                  onClick={handleSignOut}
+                  className="p-1 px-2 text-white/40 hover:text-rose-500 transition duration-150 cursor-pointer"
+                  title="Sign Out"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={handleGoogleSignIn}
+                className="h-[38px] px-3.5 border border-white/10 bg-neutral-900 hover:bg-white hover:text-black tracking-widest uppercase font-mono text-[10px] font-black text-white transition flex items-center gap-1.5 cursor-pointer"
+                title="Google Log In"
+              >
+                <LogIn className="w-3.5 h-3.5 text-blue-500" />
+                <span>SIGN IN</span>
+              </button>
+            )}
 
             {/* Cart ShoppingBag */}
             <button

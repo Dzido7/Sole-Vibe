@@ -465,13 +465,15 @@ app.post("/api/orders/:trackingId/advance", (req, res) => {
 });
 
 // 6. Gemini Recommended Engines based on browsing history
+let geminiCooldownUntil = 0;
+
 app.post("/api/recommendations", async (req, res) => {
   const { viewHistory } = req.body; // List of product IDs viewed, e.g. ["knitflow-bare", "zenith-carbon-x"]
   const db = readDb();
 
   const history = Array.isArray(viewHistory) ? viewHistory : [];
 
-  const ai = getGeminiClient();
+  const ai = Date.now() > geminiCooldownUntil ? getGeminiClient() : null;
 
   if (ai) {
     try {
@@ -517,8 +519,15 @@ Do not include any markdown backticks, explanations, or wrapper texts outside th
       if (result.curatorNote && Array.isArray(result.recommendedIds)) {
         return res.json(result);
       }
-    } catch (error) {
-      console.error("Gemini recommendation AI error, falling back to heuristic engine", error);
+    } catch (error: any) {
+      const errorMsg = error?.message || String(error);
+      const isRateLimit = errorMsg.includes("429") || errorMsg.includes("RESOURCE_EXHAUSTED") || errorMsg.includes("quota");
+      if (isRateLimit) {
+        geminiCooldownUntil = Date.now() + 60 * 1000; // 60-second cooldown
+        console.warn("[Gemini AI] Quota or rate limit exceeded (429). Entering 60-second cooldown, using high-performance heuristic fallback.");
+      } else {
+        console.error("Gemini recommendation AI error, falling back to heuristic engine:", errorMsg);
+      }
     }
   }
 
