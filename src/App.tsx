@@ -49,6 +49,8 @@ export default function App() {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [trackingOpen, setTrackingOpen] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [showDomainError, setShowDomainError] = useState(false);
+  const [currentHostname, setCurrentHostname] = useState("");
 
   // Filters State
   const [searchQuery, setSearchQuery] = useState("");
@@ -133,7 +135,18 @@ export default function App() {
       }
     } catch (err: any) {
       console.error("Google login failed:", err);
-      showToast("⚠️ Authentication failed. Please retry.");
+      const errCode = err?.code || "";
+      const errMsg = err?.message || String(err);
+      if (
+        errCode.includes("auth/unauthorized-domain") || 
+        errMsg.includes("auth/unauthorized-domain") || 
+        errMsg.includes("unauthorized-domain")
+      ) {
+        setCurrentHostname(window.location.hostname || "ais-dev-q6higktg2u22oiu4qod55w-292000331645.europe-west3.run.app");
+        setShowDomainError(true);
+      } else {
+        showToast("⚠️ Authentication failed. Please retry.");
+      }
     }
   };
 
@@ -665,6 +678,88 @@ export default function App() {
         onClose={() => setTrackingOpen(false)}
         defaultTrackingId={activeTrackingId}
       />
+
+      {/* Unauthorized Domain Error Diagnostics Overlay */}
+      <AnimatePresence>
+        {showDomainError && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 animate-fade-in">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className="w-full max-w-lg bg-neutral-950 border border-amber-500/30 p-6 md:p-8 rounded-none relative shadow-[0_0_50px_rgba(245,158,11,0.15)]"
+            >
+              {/* Warning Indicator */}
+              <div className="flex items-center gap-3 border-b border-white/10 pb-4 mb-5">
+                <div className="w-8 h-8 rounded-none bg-amber-500/10 border border-amber-500 flex items-center justify-center text-amber-500 shrink-0 select-none animate-pulse">
+                  ⚠
+                </div>
+                <div>
+                  <h3 className="text-xs font-mono font-black text-amber-500 uppercase tracking-widest leading-none">
+                    Firebase Auth Security Notice
+                  </h3>
+                  <h2 className="text-base font-sans font-black text-white uppercase tracking-tight mt-1">
+                    Unauthorized Domain (403)
+                  </h2>
+                </div>
+              </div>
+
+              <div className="space-y-4 font-sans text-xs text-white/70 leading-relaxed">
+                <p>
+                  Your customized Firebase Project <strong className="text-white font-mono font-bold bg-white/5 px-1 py-0.5 border border-white/10">gen-lang-client-0999843737</strong> blocked the authentication popup because this deployment URL matches untrusted client origins.
+                </p>
+
+                <div className="bg-neutral-900 border border-white/5 p-3.5 space-y-3 font-mono">
+                  <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider block">
+                    HOW TO REPAIR SIGN-IN:
+                  </span>
+                  
+                  <ol className="list-decimal list-inside space-y-2 text-[11px] text-white/80">
+                    <li>
+                      Open your <a 
+                        href="https://console.firebase.google.com/project/gen-lang-client-0999843737/authentication/providers" 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="underline text-blue-400 hover:text-blue-300 font-bold"
+                      >
+                        Firebase Authentication Settings
+                      </a>.
+                    </li>
+                    <li>
+                      Scroll down to the <strong className="text-white">"Authorized domains"</strong> section.
+                    </li>
+                    <li>
+                      Click <strong className="text-white">"Add domain"</strong> and enter these two values:
+                      <div className="mt-2 space-y-1.5 pl-4">
+                        <div className="flex items-center justify-between bg-black p-2 border border-white/10 text-[10px]">
+                          <span className="text-blue-500 select-all">ais-dev-q6higktg2u22oiu4qod55w-292000331645.europe-west3.run.app</span>
+                        </div>
+                        <div className="flex items-center justify-between bg-black p-2 border border-white/10 text-[10px]">
+                          <span className="text-emerald-500 select-all">ais-pre-q6higktg2u22oiu4qod55w-292000331645.europe-west3.run.app</span>
+                        </div>
+                      </div>
+                    </li>
+                  </ol>
+                </div>
+
+                <p className="text-[10px] text-white/40 italic">
+                  * Note: This error is a Firebase-side security setting and is unrelated to local React codebase compilations. Just register the domains and the sign-in will instantly launch successfully without re-deploying code!
+                </p>
+              </div>
+
+              <div className="mt-6 pt-4 border-t border-white/10 flex justify-end">
+                <button
+                  onClick={() => setShowDomainError(false)}
+                  className="px-5 py-2 bg-amber-500 text-black font-mono text-[10px] font-black uppercase tracking-widest hover:bg-white hover:text-black transition cursor-pointer"
+                >
+                  DISMISS & REVIEW
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
