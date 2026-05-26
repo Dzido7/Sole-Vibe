@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Search, ShoppingBag, Heart, Bell, Truck, SlidersHorizontal, Sparkles, Check, Flame, LogIn, LogOut, User as UserIcon } from "lucide-react";
 
-import { auth, db, googleProvider, handleFirestoreError, OperationType } from "./firebase";
+import { auth, db, googleProvider, handleFirestoreError, OperationType, config } from "./firebase";
 import { signInWithPopup, signOut, onAuthStateChanged, User } from "firebase/auth";
 import { setDoc, doc, getDocFromServer, serverTimestamp } from "firebase/firestore";
 
@@ -18,6 +18,7 @@ import RecommendationPanel from "./components/RecommendationPanel";
 
 export default function App() {
   const [products, setProducts] = useState<Product[]>([]);
+  const [productsLoading, setProductsLoading] = useState(true);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   
   // Firebase User Auth State
@@ -51,6 +52,12 @@ export default function App() {
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [showDomainError, setShowDomainError] = useState(false);
   const [currentHostname, setCurrentHostname] = useState("");
+  const [showPopupError, setShowPopupError] = useState(false);
+  const [popupErrorType, setPopupErrorType] = useState<"blocked" | "cancelled" | "assertion" | null>(null);
+
+  const pId = config?.projectId || "gen-lang-client-0999843737";
+  const devHost = currentHostname || window.location.hostname || "ais-dev-q6higktg2u22oiu4qod55w-292000331645.europe-west3.run.app";
+  const preHost = devHost.replace("ais-dev-", "ais-pre-");
 
   // Filters State
   const [searchQuery, setSearchQuery] = useState("");
@@ -85,6 +92,7 @@ export default function App() {
 
   const fetchProducts = async () => {
     try {
+      setProductsLoading(true);
       const res = await fetch("/api/products");
       if (res.ok) {
         const data = await res.json();
@@ -92,6 +100,8 @@ export default function App() {
       }
     } catch (err) {
       console.error(err);
+    } finally {
+      setProductsLoading(false);
     }
   };
 
@@ -144,6 +154,28 @@ export default function App() {
       ) {
         setCurrentHostname(window.location.hostname || "ais-dev-q6higktg2u22oiu4qod55w-292000331645.europe-west3.run.app");
         setShowDomainError(true);
+      } else if (
+        errCode.includes("auth/popup-blocked") || 
+        errMsg.includes("popup-blocked") ||
+        errMsg.includes("popup_blocked")
+      ) {
+        setPopupErrorType("blocked");
+        setShowPopupError(true);
+      } else if (
+        errCode.includes("auth/cancelled-popup-request") || 
+        errMsg.includes("cancelled-popup-request") ||
+        errMsg.includes("cancelled_popup") ||
+        errMsg.includes("popup-closed-by-user") ||
+        errCode.includes("popup-closed-by-user")
+      ) {
+        setPopupErrorType("cancelled");
+        setShowPopupError(true);
+      } else if (
+        errMsg.includes("Pending promise was never set") || 
+        errMsg.includes("assertion failed")
+      ) {
+        setPopupErrorType("assertion");
+        setShowPopupError(true);
       } else {
         showToast("⚠️ Authentication failed. Please retry.");
       }
@@ -182,10 +214,25 @@ export default function App() {
       }
     });
 
+    const handleRejection = (event: PromiseRejectionEvent) => {
+      const reason = event.reason?.message || String(event.reason || "");
+      if (
+        reason.includes("Pending promise was never set") || 
+        reason.includes("assertion failed") || 
+        reason.includes("Internal assertion failed")
+      ) {
+        event.preventDefault();
+        setPopupErrorType("assertion");
+        setShowPopupError(true);
+      }
+    };
+    window.addEventListener("unhandledrejection", handleRejection);
+
     const interval = setInterval(fetchUnreadNotifications, 8000);
     return () => {
       clearInterval(interval);
       unsubscribe();
+      window.removeEventListener("unhandledrejection", handleRejection);
     };
   }, []);
 
@@ -301,6 +348,14 @@ export default function App() {
     fetchProducts(); // refresh products inventory stock in app
   };
 
+  const handleResetFilters = () => {
+    setSearchQuery("");
+    setSelectedCategory("All");
+    setSelectedSizeFilter(null);
+    setPriceRange(220);
+    showToast("🧹 Restored catalog to original state.");
+  };
+
   // Custom filters list
   const categories = ["All", "Running", "Retro Basketball", "Lifestyle", "Outdoor"];
 
@@ -317,6 +372,23 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#070707] text-white flex flex-col font-sans select-none antialiased relative pb-16 overflow-hidden">
+      
+      {/* Iframe Popup Prevention Advisory Banner */}
+      {window.self !== window.top && (
+        <div className="bg-gradient-to-r from-blue-900/40 via-blue-600/30 to-rose-900/40 border-b border-blue-500/30 px-4 py-2.5 text-center text-[10px] font-mono tracking-widest uppercase flex flex-col sm:flex-row items-center justify-center gap-2 select-none relative z-50">
+          <span className="text-blue-300 font-bold flex items-center gap-1">
+            <span>⚡</span> IFRAME ENVIRONMENT DETECTED — BROWSER PRIVACY RESTRICTIONS MAY PREVENT POPUP HANDSHAKES
+          </span>
+          <a
+            href={window.location.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-3 py-1 bg-white hover:bg-black text-black hover:text-white transition font-mono font-black text-[9px] uppercase border border-white flex items-center gap-1.5 cursor-pointer shadow-[0_0_10px_purple-500]"
+          >
+            <span>LAUNCH IN NEW TAB</span>
+          </a>
+        </div>
+      )}
       
       {/* Massive Background Typography Watermark */}
       <div className="absolute inset-0 flex items-center justify-center opacity-[0.02] select-none pointer-events-none overflow-hidden z-0">
@@ -575,11 +647,28 @@ export default function App() {
                 </div>
 
                 {/* Listing grid */}
-                {filteredProducts.length === 0 ? (
+                {productsLoading ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {[1, 2, 3].map((num) => (
+                      <div key={num} className="border border-white/5 bg-neutral-900/40 p-5 space-y-4 animate-pulse">
+                        <div className="aspect-square bg-white/5 w-full"></div>
+                        <div className="h-4 bg-white/10 w-3/4"></div>
+                        <div className="h-3 bg-white/5 w-1/2"></div>
+                        <div className="h-5 bg-white/10 w-1/4"></div>
+                      </div>
+                    ))}
+                  </div>
+                ) : filteredProducts.length === 0 ? (
                   <div className="flex flex-col items-center justify-center p-20 bg-neutral-900/20 border border-white/10 rounded-none text-center backdrop-blur-md">
-                    <SlidersHorizontal className="w-10 h-10 text-white/20 mb-2" />
+                    <SlidersHorizontal className="w-10 h-10 text-white/20 mb-3" />
                     <p className="text-sm font-bold uppercase tracking-wider text-white">No matching releases found</p>
-                    <p className="text-xs text-white/40 max-w-sm mt-1">Adjust size selection filters, reduce price bounds, or clear query constraints.</p>
+                    <p className="text-xs text-white/40 max-w-sm mt-1 mb-6">Adjust size selection filters, reduce price bounds, or clear query constraints.</p>
+                    <button
+                      onClick={handleResetFilters}
+                      className="px-5 py-2.5 bg-blue-600 hover:bg-white text-white hover:text-black font-mono text-[10px] uppercase font-black tracking-widest transition duration-200 cursor-pointer shadow-lg"
+                    >
+                      Reset All Filters
+                    </button>
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -707,7 +796,7 @@ export default function App() {
 
               <div className="space-y-4 font-sans text-xs text-white/70 leading-relaxed">
                 <p>
-                  Your customized Firebase Project <strong className="text-white font-mono font-bold bg-white/5 px-1 py-0.5 border border-white/10">gen-lang-client-0999843737</strong> blocked the authentication popup because this deployment URL matches untrusted client origins.
+                  Your customized Firebase Project <strong className="text-white font-mono font-bold bg-white/5 px-1 py-0.5 border border-white/10">{pId}</strong> blocked the authentication popup because this deployment URL matches untrusted client origins.
                 </p>
 
                 <div className="bg-neutral-900 border border-white/5 p-3.5 space-y-3 font-mono">
@@ -718,7 +807,7 @@ export default function App() {
                   <ol className="list-decimal list-inside space-y-2 text-[11px] text-white/80">
                     <li>
                       Open your <a 
-                        href="https://console.firebase.google.com/project/gen-lang-client-0999843737/authentication/providers" 
+                        href={`https://console.firebase.google.com/project/${pId}/authentication/providers`} 
                         target="_blank" 
                         rel="noopener noreferrer"
                         className="underline text-blue-400 hover:text-blue-300 font-bold"
@@ -732,11 +821,11 @@ export default function App() {
                     <li>
                       Click <strong className="text-white">"Add domain"</strong> and enter these two values:
                       <div className="mt-2 space-y-1.5 pl-4">
-                        <div className="flex items-center justify-between bg-black p-2 border border-white/10 text-[10px]">
-                          <span className="text-blue-500 select-all">ais-dev-q6higktg2u22oiu4qod55w-292000331645.europe-west3.run.app</span>
+                        <div className="flex items-center justify-between bg-black p-2 border border-white/10 text-[10.5px]">
+                          <span className="text-blue-400 select-all font-bold">{devHost}</span>
                         </div>
-                        <div className="flex items-center justify-between bg-black p-2 border border-white/10 text-[10px]">
-                          <span className="text-emerald-500 select-all">ais-pre-q6higktg2u22oiu4qod55w-292000331645.europe-west3.run.app</span>
+                        <div className="flex items-center justify-between bg-black p-2 border border-white/10 text-[10.5px]">
+                          <span className="text-emerald-400 select-all font-bold">{preHost}</span>
                         </div>
                       </div>
                     </li>
@@ -755,6 +844,130 @@ export default function App() {
                 >
                   DISMISS & REVIEW
                 </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Firebase Auth Popup / Assertion Error Diagnostic Modal */}
+      <AnimatePresence>
+        {showPopupError && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 animate-fade-in">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className="w-full max-w-lg bg-neutral-950 border border-blue-500/30 p-6 md:p-8 rounded-none relative shadow-[0_0_50px_rgba(37,99,235,0.15)]"
+            >
+              <div className="flex items-center gap-3 border-b border-white/10 pb-4 mb-5">
+                <div className="w-8 h-8 rounded-none bg-blue-500/10 border border-blue-500 flex items-center justify-center text-blue-500 shrink-0 select-none animate-pulse">
+                  ℹ
+                </div>
+                <div>
+                  <h3 className="text-xs font-mono font-black text-blue-500 uppercase tracking-widest leading-none">
+                    Google Sign-In Diagnostic
+                  </h3>
+                  <h2 className="text-base font-sans font-black text-white uppercase tracking-tight mt-1">
+                    {popupErrorType === "blocked" && "Popup Was Blocked"}
+                    {popupErrorType === "cancelled" && "Login Cancelled or Interrupted"}
+                    {popupErrorType === "assertion" && "Auth Internal Congestion"}
+                  </h2>
+                </div>
+              </div>
+
+              <div className="space-y-4 font-sans text-xs text-white/70 leading-relaxed">
+                {popupErrorType === "blocked" && (
+                  <>
+                    <p>
+                      Your web browser blocked the sign-in popup. This typically happens inside sandboxed <strong>iframes</strong> due to privacy protections.
+                    </p>
+                    <div className="bg-neutral-900 border border-white/5 p-4 font-mono text-[11px] text-white/90 space-y-2">
+                      <span className="text-blue-400 font-bold block uppercase tracking-wider text-[10px]">
+                        EASY REPAIR OPTIONS:
+                      </span>
+                      <ul className="list-disc list-inside space-y-1">
+                        <li>
+                          <strong className="text-white">Recommended:</strong> Open the app in a new tab by clicking the <strong className="text-blue-500">Launch in New Tab</strong> button at the top of the page. Popups work perfectly outside of iframes!
+                        </li>
+                        <li>
+                          Check your browser address bar for a blocked popup icon (🔒 or ⊗) and select <strong className="text-white">"Always allow popups"</strong>.
+                        </li>
+                      </ul>
+                    </div>
+                  </>
+                )}
+
+                {popupErrorType === "cancelled" && (
+                  <>
+                    <p>
+                      The Google pop-up tab was closed before authentication finished, or your browser rejected the cross-domain communications token.
+                    </p>
+                    <div className="bg-neutral-900 border border-white/5 p-4 font-mono text-[11px] text-white/90 space-y-2">
+                      <span className="text-blue-400 font-bold block uppercase tracking-wider text-[10px]">
+                        WHY DID THIS HAPPEN?
+                      </span>
+                      <p>
+                        Browsers strictly block cross-domain messages inside nested frames. Google Auth requires establishing secure handshake tokens between domains which is blocked in iframe contexts.
+                      </p>
+                      <span className="text-emerald-400 font-bold block uppercase tracking-wider text-[10px] mt-2">
+                        TO RESOLVE:
+                      </span>
+                      <p>
+                        Open the application in a separate full-window browser tab and try signing in again. It will succeed instantly!
+                      </p>
+                    </div>
+                  </>
+                )}
+
+                {popupErrorType === "assertion" && (
+                  <>
+                    <p>
+                      Firebase received multiple parallel login attempts or a hanging request, resulting in a system congestion error: 
+                      <code className="text-[10px] bg-red-955 text-rose-400 border border-rose-950/40 font-mono px-1.5 py-0.5 ml-1">
+                        Pending promise was never set
+                      </code>.
+                    </p>
+                    <div className="bg-neutral-900 border border-white/5 p-4 font-mono text-[11px] text-white/90 space-y-2">
+                      <span className="text-rose-400 font-bold block uppercase tracking-wider text-[10px]">
+                        HOW TO CLEAR CONGESTION:
+                      </span>
+                      <p>
+                        A page reload is required to reset the Firebase client instance and clear the locked pending session promise state.
+                      </p>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="mt-6 pt-4 border-t border-white/10 flex justify-between gap-3">
+                {popupErrorType === "assertion" ? (
+                  <button
+                    onClick={() => window.location.reload()}
+                    className="flex-1 py-2.5 bg-rose-600 text-white font-mono text-[10px] font-black uppercase tracking-widest hover:bg-white hover:text-black transition cursor-pointer text-center"
+                  >
+                    RELOAD INITIAL STATE
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => {
+                        setShowPopupError(false);
+                        window.open(window.location.href, "_blank");
+                      }}
+                      className="flex-1 py-2.5 bg-blue-600 text-white font-mono text-[10px] font-black uppercase tracking-widest hover:bg-white hover:text-black transition cursor-pointer text-center"
+                    >
+                      OPEN IN NEW TAB
+                    </button>
+                    <button
+                      onClick={() => setShowPopupError(false)}
+                      className="px-4 py-2.5 border border-white/10 text-white/40 font-mono text-[10px] uppercase tracking-wider hover:text-white transition cursor-pointer"
+                    >
+                      CLOSE
+                    </button>
+                  </>
+                )}
               </div>
             </motion.div>
           </div>
