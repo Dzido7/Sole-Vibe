@@ -595,6 +595,7 @@ app.post("/api/notifications/simulate", (req, res) => {
 async function startServer() {
   // Service generated local assets securely
   app.use("/src/assets/images", express.static(path.join(process.cwd(), "src", "assets", "images")));
+  app.use("/images", express.static(path.join(process.cwd(), "public", "images")));
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
